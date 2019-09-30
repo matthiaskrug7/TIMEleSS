@@ -1,0 +1,161 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+
+"""
+This is part of the TIMEleSS tools
+http://timeless.texture.rocks/
+
+Copyright (C) S. Merkel, Universite de Lille, France
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+"""
+
+"""
+Written by M. Krug, University of Münster, Germany on 30/09/2019
+"""
+
+# System functions, to manipulate command line arguments
+import sys
+import argparse
+import os.path
+
+# Maths stuff
+import numpy
+
+# TIMEleSS parsing utilities
+from TIMEleSS.general import multigrainOutputParser
+from TIMEleSS.general import grain3DXRD
+from TIMEleSS.simulation import grainComparison
+
+
+# Get g-vectors of file 1
+def get_gve1(file1, hkl1):
+	grains1 = multigrainOutputParser.parseGrains(file1)
+	gvelist1 = []
+	for grain in grains1:
+		U = grain.getU()
+		B = grain.getB()
+		UB = numpy.mat(U) * numpy.mat(B)
+		gve1 = numpy.dot(UB,hkl1)
+		gve1 = numpy.array(gve1)
+		gve1 = gve1[0]	# Getting rid of the double brackets which are produced in the previous steps
+		gve1 = numpy.array(gve1)
+		gvelist1.append(gve1)
+	return gvelist1
+
+# Get g-vectors of file 2 (same function as above)
+def get_gve2(file2, hkl2):
+	grains2 = multigrainOutputParser.parseGrains(file2)
+	gvelist2 = []
+	for grain in grains2:
+		U = grain.getU()
+		B = grain.getB()
+		UB = numpy.mat(U) * numpy.mat(B)
+		gve2 = numpy.dot(UB,hkl2)
+		gve2 = numpy.array(gve2)
+		gve2 = gve2[0]	# Getting rid of the double brackets which are produced in the previous steps
+		gve2 = numpy.array(gve2)
+		gvelist2.append(gve2)
+	return gvelist2
+
+# Calculate the angle between the two UB matrices and check if they are within the misorientation. If so, print text to the command line. If an output file is demanded, create also the output file.
+def calcangle(gvelist1, gvelist2, misorientation, out, outputfile, hkl1, hkl2, file1, file2):
+	counter = 0
+	if out == True:
+		f = open(outputfile, 'w')
+		f.write("#File 1, Grain number\n#Plane\n#Gvector\n#\n#File 2, Grain number\n#Plane\n#Gvector\n#\n#Misorientation in degrees\n\n\n")
+	for index1, gve1 in enumerate(gvelist1):
+		for index2, gve2 in enumerate(gvelist2):
+			dot = numpy.dot(gve1,gve2)
+			gve1_abs = numpy.sqrt((gve1*gve1).sum())
+			gve2_abs = numpy.sqrt((gve2*gve2).sum())
+			cos_angle = dot / gve1_abs / gve2_abs # cosine of angle between x and y
+			angle = numpy.arccos(cos_angle)
+			degree_angle = angle * 360 / 2 / numpy.pi # angle in degrees
+			if abs(degree_angle) <= misorientation:
+				counter += 1
+				print "We found a match!\nThe %s plane of grain %s of %s matches \nthe %s plane of grain %s of %s with a misorientation of %f degrees" % (hkl1, index1, file1, hkl2, index2, file2, degree_angle)
+				if out == True: # If output file demanded, create output file.
+					f.write("%s, %s\n%s\n%s\n\n%s, %s\n%s\n%s\n\n%s\n\n\n" % (file1, index1, hkl1, gve1, file2, index2, hkl2, gve2, degree_angle))
+	if out == True:
+		f.write("%i matching planes were found in total.\n" % (counter))
+		f.close()
+	print "%i matching planes were found in total." % (counter)
+	return counter
+
+
+#################################################################
+#
+# Main subroutines
+#
+#################################################################
+
+class MyParser(argparse.ArgumentParser):
+	"""
+	Extend the regular argument parser to show the full help in case of error
+	"""
+	def error(self, message):
+		
+		sys.stderr.write('\nError : %s\n\n' % message)
+		self.print_help()
+		sys.exit(2)
+
+def main(argv):
+	"""
+	Main subroutine
+	"""
+	
+	parser = MyParser(usage='%(prog)s -f1 file1 -h1 hkl1 -f2 file2 -h2 hkl2 -m misorientation [OPTIONS]', description="Compares two crystal planes from two different log files and checks whether they are identical within a given misorientation.\nThis is part of the TIMEleSS project\nhttp://timeless.texture.rocks\n")
+	
+	# Required arguments
+	parser.add_argument('-f1', '--logfile1', required=True, help="Name of the first log file (required)")
+	parser.add_argument('-h1', '--hkl1', required=True, help="hkl of the plane in the first file. Write with square brackets and commas like so: [0,-2,1] (required)", type=str)
+	parser.add_argument('-f2', '--logfile2', required=True, help="Name of the second log file (required)")
+	parser.add_argument('-h2', '--hkl2', required=True, help="hkl of the plane in the second file. Write with square brackets and commas like so: [0,-2,1] (required)", type=str)
+	parser.add_argument('-m', '--misorientation', required=True, help="Misorientation between the two planes (required)", type=float)
+	
+	# Optionnal arguments
+	parser.add_argument('-n', '--outputfilename', required=False, help="Name of the output file. Default is %(default)s", type=str, default="matching_planes.txt")
+	parser.add_argument('-o', '--createoutputfile', required=False, help="Create an output file. Can be True or False. Default is %(default)s", type=bool, default=False)
+
+	args = vars(parser.parse_args())
+	
+	# Assigning the input to the variables in the script.
+	file1 = args['logfile1']
+	# Commands to convert input from string into list. Not a nice one but it does the job.
+	hkl1_str = args['hkl1'].replace('[', ' ').replace(']', ' ').replace(',', ' ').split()
+	hkl1 = [int(i) for i in hkl1_str]
+	file2 = args['logfile2']
+	hkl2_str = args['hkl2'].replace('[', ' ').replace(']', ' ').replace(',', ' ').split()
+	hkl2 = [int(i) for i in hkl2_str]
+	misorientation = args['misorientation']
+	out = args['createoutputfile']
+	outputfile = args['outputfilename']
+
+	# Calling the functions
+	gvelist1 = get_gve1(file1, hkl1)
+	gvelist2 = get_gve2(file2, hkl2)
+	calcangle(gvelist1, gvelist2, misorientation, out, outputfile, hkl1, hkl2, file1, file2)
+
+
+# Calling method 1 (used when generating a binary in setup.py)
+def run():
+	main(sys.argv[1:])
+
+# Calling method 2 (if run from the command line)
+if __name__ == "__main__":
+	main(sys.argv[1:])
+
